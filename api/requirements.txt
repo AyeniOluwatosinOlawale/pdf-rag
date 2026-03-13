@@ -1,6 +1,6 @@
 anthropic
 pdfplumber
-qdrant-client
+qdrant-client==1.14.3
 requests
 fastapi
 uvicorn[standard]
