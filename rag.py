@@ -19,20 +19,35 @@ VECTOR_SIZE = 384
 HF_API_URL = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
 
 
-def embed(texts: list[str]) -> list[list[float]]:
-    """Embed texts via HuggingFace Inference API — no local model download."""
-    headers = {}
+def embed(texts: list[str], batch_size: int = 32) -> list[list[float]]:
+    """Embed texts via HuggingFace Inference API in batches."""
+    headers = {"Content-Type": "application/json"}
     token = os.environ.get("HF_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    resp = requests.post(
-        HF_API_URL,
-        headers=headers,
-        json={"inputs": texts, "options": {"wait_for_model": True}},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()
+
+    all_embeddings: list[list[float]] = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        resp = requests.post(
+            HF_API_URL,
+            headers=headers,
+            json={"inputs": batch, "options": {"wait_for_model": True}},
+            timeout=60,
+        )
+        if resp.status_code == 503:
+            # Model still loading — wait and retry once
+            import time
+            time.sleep(10)
+            resp = requests.post(
+                HF_API_URL,
+                headers=headers,
+                json={"inputs": batch, "options": {"wait_for_model": True}},
+                timeout=60,
+            )
+        resp.raise_for_status()
+        all_embeddings.extend(resp.json())
+    return all_embeddings
 
 
 def extract_text(pdf_path: str) -> str:
