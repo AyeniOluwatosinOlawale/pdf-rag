@@ -115,12 +115,12 @@ class PDFRag:
 
     def query(self, question: str, top_k: int = TOP_K) -> str:
         query_vector = embed([question], input_type="search_query")[0]
-        results = self.qdrant.search(
+        results = self.qdrant.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             limit=top_k,
             with_payload=True,
-        )
+        ).points
 
         chunks = [r.payload["text"] for r in results]
         sources = [r.payload["source"] for r in results]
