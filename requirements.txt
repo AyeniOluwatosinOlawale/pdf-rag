@@ -1,7 +1,7 @@
 anthropic
 pdfplumber
 qdrant-client
-fastembed
+requests
 fastapi
 uvicorn[standard]
 python-multipart

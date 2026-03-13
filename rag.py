@@ -4,35 +4,38 @@ import os
 import uuid
 from pathlib import Path
 
+import requests
 import pdfplumber
-from fastembed import TextEmbedding
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 import anthropic
 
 
-CHUNK_SIZE = 800       # characters per chunk
-CHUNK_OVERLAP = 150    # overlap between chunks
-TOP_K = 5              # number of chunks to retrieve
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 150
+TOP_K = 5
 MODEL = "claude-opus-4-6"
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-VECTOR_SIZE = 384      # output dimension for all-MiniLM-L6-v2
+VECTOR_SIZE = 384
+HF_API_URL = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
 
-# Cache fastembed models in /tmp so Vercel's read-only filesystem isn't a problem
-os.environ["FASTEMBED_CACHE_PATH"] = "/tmp/fastembed"
 
-# Module-level singleton — model is downloaded once per container lifetime
-_embed_model: "TextEmbedding | None" = None
-
-def get_embed_model() -> "TextEmbedding":
-    global _embed_model
-    if _embed_model is None:
-        _embed_model = TextEmbedding(EMBEDDING_MODEL)
-    return _embed_model
+def embed(texts: list[str]) -> list[list[float]]:
+    """Embed texts via HuggingFace Inference API — no local model download."""
+    headers = {}
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    resp = requests.post(
+        HF_API_URL,
+        headers=headers,
+        json={"inputs": texts, "options": {"wait_for_model": True}},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 def extract_text(pdf_path: str) -> str:
-    """Extract full text from a PDF file."""
     text_parts = []
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -43,12 +46,10 @@ def extract_text(pdf_path: str) -> str:
 
 
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    """Split text into overlapping chunks."""
     chunks = []
     start = 0
     while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
+        chunks.append(text[start:start + chunk_size])
         start += chunk_size - overlap
     return chunks
 
@@ -60,7 +61,6 @@ class PDFRag:
         self.client = anthropic.Anthropic()
         self.collection_name = collection_name
 
-        # Qdrant Cloud when QDRANT_URL is set, local file storage otherwise
         qdrant_url = os.environ.get("QDRANT_URL")
         if qdrant_url:
             self.qdrant = QdrantClient(
@@ -68,8 +68,7 @@ class PDFRag:
                 api_key=os.environ.get("QDRANT_API_KEY"),
             )
         else:
-            persist_dir = os.environ.get("QDRANT_DIR", "./qdrant_db")
-            self.qdrant = QdrantClient(path=persist_dir)
+            self.qdrant = QdrantClient(path=os.environ.get("QDRANT_DIR", "./qdrant_db"))
 
         existing = {c.name for c in self.qdrant.get_collections().collections}
         if collection_name not in existing:
@@ -79,7 +78,6 @@ class PDFRag:
             )
 
     def ingest(self, pdf_path: str) -> int:
-        """Parse a PDF and store its chunks in Qdrant. Returns number of chunks added."""
         path = Path(pdf_path)
         if not path.exists():
             raise FileNotFoundError(f"PDF not found: {pdf_path}")
@@ -89,7 +87,7 @@ class PDFRag:
         chunks = chunk_text(text)
 
         print(f"Embedding {len(chunks)} chunks...")
-        vectors = [v.tolist() for v in get_embed_model().embed(chunks)]
+        vectors = embed(chunks)
 
         points = [
             PointStruct(
@@ -100,14 +98,13 @@ class PDFRag:
             for i, (chunk, vector) in enumerate(zip(chunks, vectors))
         ]
 
-        print(f"Storing {len(chunks)} chunks in Qdrant...")
+        print(f"Storing {len(points)} chunks in Qdrant...")
         self.qdrant.upsert(collection_name=self.collection_name, points=points)
-        print(f"Done. Ingested {len(chunks)} chunks from '{path.name}'.")
-        return len(chunks)
+        print(f"Done. Ingested {len(points)} chunks from '{path.name}'.")
+        return len(points)
 
     def query(self, question: str, top_k: int = TOP_K) -> str:
-        """Retrieve relevant chunks and ask Claude to answer the question."""
-        query_vector = next(get_embed_model().embed([question])).tolist()
+        query_vector = embed([question])[0]
         results = self.qdrant.search(
             collection_name=self.collection_name,
             query_vector=query_vector,
@@ -133,29 +130,18 @@ class PDFRag:
             max_tokens=1024,
             thinking={"type": "adaptive"},
             system=system,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Context from documents:\n\n{context}\n\n"
-                        f"Question: {question}"
-                    ),
-                }
-            ],
+            messages=[{"role": "user", "content": f"Context from documents:\n\n{context}\n\nQuestion: {question}"}],
         )
 
         for block in response.content:
             if block.type == "text":
                 return block.text
-
         return ""
 
     def list_sources(self) -> list[str]:
-        """Return the unique PDF sources currently ingested."""
         points, _ = self.qdrant.scroll(
             collection_name=self.collection_name,
             with_payload=True,
             limit=10000,
         )
-        sources = {point.payload["source"] for point in points}
-        return sorted(sources)
+        return sorted({point.payload["source"] for point in points})
