@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF RAG</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 0.25rem;
+    }
+    .subtitle { color: #94a3b8; font-size: 0.9rem; margin-bottom: 2rem; }
+
+    .card {
+      background: #1e2130;
+      border: 1px solid #2d3348;
+      border-radius: 12px;
+      padding: 1.5rem;
+      width: 100%;
+      max-width: 720px;
+      margin-bottom: 1.25rem;
+    }
+    .card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: #cbd5e1; }
+
+    /* Upload */
+    .drop-zone {
+      border: 2px dashed #3b4563;
+      border-radius: 8px;
+      padding: 2rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: #6366f1;
+      background: #1a1d2e;
+    }
+    .drop-zone input { display: none; }
+    .drop-zone p { color: #64748b; font-size: 0.875rem; }
+    .drop-zone p span { color: #6366f1; font-weight: 500; }
+
+    .file-list { margin-top: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .file-chip {
+      background: #2d3348;
+      border-radius: 6px;
+      padding: 0.25rem 0.6rem;
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .file-chip .remove {
+      cursor: pointer;
+      color: #94a3b8;
+      line-height: 1;
+      font-size: 0.9rem;
+    }
+    .file-chip .remove:hover { color: #f87171; }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.5rem 1.1rem;
+      border-radius: 8px;
+      border: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary { background: #6366f1; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #4f51d0; }
+    .btn-ghost { background: #2d3348; color: #cbd5e1; }
+    .btn-ghost:hover:not(:disabled) { background: #3b4563; }
+
+    .ingest-footer { display: flex; justify-content: flex-end; margin-top: 1rem; }
+
+    /* Sources */
+    #source-list { display: flex; flex-wrap: wrap; gap: 0.5rem; min-height: 1.5rem; }
+    .source-tag {
+      background: #1a2840;
+      border: 1px solid #1e40af;
+      color: #93c5fd;
+      border-radius: 6px;
+      padding: 0.2rem 0.6rem;
+      font-size: 0.78rem;
+    }
+    .empty-hint { color: #475569; font-size: 0.85rem; }
+
+    /* Chat */
+    .chat-container {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      max-height: 500px;
+      overflow-y: auto;
+      margin-bottom: 1rem;
+      padding-right: 0.25rem;
+    }
+    .chat-container::-webkit-scrollbar { width: 5px; }
+    .chat-container::-webkit-scrollbar-track { background: transparent; }
+    .chat-container::-webkit-scrollbar-thumb { background: #3b4563; border-radius: 4px; }
+
+    .msg { display: flex; gap: 0.75rem; }
+    .msg.user { flex-direction: row-reverse; }
+    .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .avatar.ai  { background: #312e81; color: #a5b4fc; }
+    .avatar.usr { background: #1e3a5f; color: #93c5fd; }
+
+    .bubble {
+      max-width: 82%;
+      padding: 0.65rem 0.9rem;
+      border-radius: 10px;
+      font-size: 0.875rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.user  .bubble { background: #1e3a5f; border-bottom-right-radius: 2px; }
+    .msg.ai    .bubble { background: #1e2130; border: 1px solid #2d3348; border-bottom-left-radius: 2px; }
+
+    .typing { display: flex; gap: 4px; align-items: center; padding: 0.65rem 0.9rem; }
+    .typing span {
+      width: 7px; height: 7px;
+      background: #6366f1;
+      border-radius: 50%;
+      animation: bounce 1.2s infinite;
+    }
+    .typing span:nth-child(2) { animation-delay: 0.2s; }
+    .typing span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); }
+      40%           { transform: translateY(-6px); }
+    }
+
+    .input-row { display: flex; gap: 0.5rem; }
+    #question {
+      flex: 1;
+      background: #13151f;
+      border: 1px solid #2d3348;
+      border-radius: 8px;
+      color: #e2e8f0;
+      padding: 0.6rem 0.9rem;
+      font-size: 0.875rem;
+      outline: none;
+      transition: border-color 0.15s;
+      resize: none;
+    }
+    #question:focus { border-color: #6366f1; }
+    #question::placeholder { color: #475569; }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 1.5rem;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: #1e2130;
+      border: 1px solid #2d3348;
+      color: #e2e8f0;
+      padding: 0.6rem 1.2rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      transition: transform 0.3s;
+      z-index: 999;
+      white-space: nowrap;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+    #toast.error { border-color: #7f1d1d; color: #fca5a5; }
+    #toast.success { border-color: #14532d; color: #86efac; }
+  </style>
+</head>
+<body>
+
+  <h1>PDF RAG</h1>
+  <p class="subtitle">Ask questions about your PDFs — powered by Claude</p>
+
+  <!-- Upload card -->
+  <div class="card">
+    <h2>Upload PDFs</h2>
+    <div class="drop-zone" id="drop-zone">
+      <input type="file" id="file-input" accept=".pdf" multiple />
+      <p>Drop PDF files here or <span>click to browse</span></p>
+    </div>
+    <div class="file-list" id="file-list"></div>
+    <div class="ingest-footer">
+      <button class="btn btn-primary" id="ingest-btn" disabled>Ingest</button>
+    </div>
+  </div>
+
+  <!-- Sources card -->
+  <div class="card">
+    <h2>Ingested Sources</h2>
+    <div id="source-list"><span class="empty-hint">No PDFs ingested yet.</span></div>
+  </div>
+
+  <!-- Chat card -->
+  <div class="card">
+    <h2>Ask a Question</h2>
+    <div class="chat-container" id="chat"></div>
+    <div class="input-row">
+      <textarea id="question" rows="1" placeholder="Ask something about your PDFs…"></textarea>
+      <button class="btn btn-primary" id="ask-btn">Ask</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+<script>
+  const dropZone   = document.getElementById("drop-zone");
+  const fileInput  = document.getElementById("file-input");
+  const fileList   = document.getElementById("file-list");
+  const ingestBtn  = document.getElementById("ingest-btn");
+  const sourceList = document.getElementById("source-list");
+  const chat       = document.getElementById("chat");
+  const questionEl = document.getElementById("question");
+  const askBtn     = document.getElementById("ask-btn");
+  const toastEl    = document.getElementById("toast");
+
+  let pendingFiles = [];
+
+  /* ── Toast ── */
+  let toastTimer;
+  function toast(msg, type = "info") {
+    toastEl.textContent = msg;
+    toastEl.className = `show ${type}`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.className = "", 3500);
+  }
+
+  /* ── Drop zone ── */
+  dropZone.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => addFiles([...fileInput.files]));
+
+  dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragover"); });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+  dropZone.addEventListener("drop", e => {
+    e.preventDefault();
+    dropZone.classList.remove("dragover");
+    addFiles([...e.dataTransfer.files].filter(f => f.name.endsWith(".pdf")));
+  });
+
+  function addFiles(files) {
+    files.forEach(f => {
+      if (!pendingFiles.find(p => p.name === f.name)) pendingFiles.push(f);
+    });
+    renderFileList();
+  }
+
+  function renderFileList() {
+    fileList.innerHTML = "";
+    pendingFiles.forEach((f, i) => {
+      const chip = document.createElement("div");
+      chip.className = "file-chip";
+      chip.innerHTML = `<span>${f.name}</span><span class="remove" data-i="${i}">✕</span>`;
+      fileList.appendChild(chip);
+    });
+    ingestBtn.disabled = pendingFiles.length === 0;
+  }
+
+  fileList.addEventListener("click", e => {
+    if (e.target.classList.contains("remove")) {
+      pendingFiles.splice(+e.target.dataset.i, 1);
+      renderFileList();
+    }
+  });
+
+  /* ── Ingest ── */
+  ingestBtn.addEventListener("click", async () => {
+    if (!pendingFiles.length) return;
+    ingestBtn.disabled = true;
+    ingestBtn.textContent = "Ingesting…";
+
+    let ok = 0, fail = 0;
+    for (const file of pendingFiles) {
+      const fd = new FormData();
+      fd.append("file", file);
+      try {
+        const res = await fetch("/api/ingest-file", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) { fail++; toast(data.detail || "Upload failed.", "error"); }
+        else ok++;
+      } catch { fail++; toast("Network error.", "error"); }
+    }
+
+    pendingFiles = [];
+    renderFileList();
+    ingestBtn.textContent = "Ingest";
+
+    if (ok) toast(`${ok} PDF${ok > 1 ? "s" : ""} ingested successfully.`, "success");
+    await loadSources();
+  });
+
+  /* ── Sources ── */
+  async function loadSources() {
+    const res = await fetch("/api/sources");
+    const { sources } = await res.json();
+    sourceList.innerHTML = sources.length
+      ? sources.map(s => `<span class="source-tag">${s}</span>`).join("")
+      : `<span class="empty-hint">No PDFs ingested yet.</span>`;
+  }
+
+  /* ── Chat ── */
+  function appendMsg(role, text) {
+    const isUser = role === "user";
+    const div = document.createElement("div");
+    div.className = `msg ${isUser ? "user" : "ai"}`;
+    div.innerHTML = `
+      <div class="avatar ${isUser ? "usr" : "ai"}">${isUser ? "You" : "AI"}</div>
+      <div class="bubble">${escHtml(text)}</div>`;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    return div;
+  }
+
+  function appendTyping() {
+    const div = document.createElement("div");
+    div.className = "msg ai";
+    div.id = "typing-indicator";
+    div.innerHTML = `<div class="avatar ai">AI</div><div class="bubble typing"><span></span><span></span><span></span></div>`;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    return div;
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  async function ask() {
+    const q = questionEl.value.trim();
+    if (!q) return;
+    questionEl.value = "";
+    questionEl.style.height = "auto";
+
+    appendMsg("user", q);
+    const typing = appendTyping();
+    askBtn.disabled = true;
+
+    try {
+      const res = await fetch("/api/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q }),
+      });
+      const data = await res.json();
+      typing.remove();
+      if (!res.ok) { toast(data.detail || "Query failed.", "error"); return; }
+      appendMsg("ai", data.answer);
+    } catch {
+      typing.remove();
+      toast("Network error.", "error");
+    } finally {
+      askBtn.disabled = false;
+    }
+  }
+
+  askBtn.addEventListener("click", ask);
+  questionEl.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); }
+  });
+
+  // auto-grow textarea
+  questionEl.addEventListener("input", () => {
+    questionEl.style.height = "auto";
+    questionEl.style.height = questionEl.scrollHeight + "px";
+  });
+
+  loadSources();
+</script>
+</body>
+</html>

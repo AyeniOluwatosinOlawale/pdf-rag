@@ -1,0 +1,9 @@
+[build]
+  publish = "static"
+
+# Proxy /api/* to the Render backend — no CORS, no exposed URL in frontend
+[[redirects]]
+  from   = "/api/*"
+  to     = "https://YOUR-APP.onrender.com/api/:splat"
+  status = 200
+  force  = true

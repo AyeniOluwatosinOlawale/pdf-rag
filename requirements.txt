@@ -1,0 +1,7 @@
+anthropic
+pdfplumber
+chromadb
+sentence-transformers
+fastapi
+uvicorn[standard]
+python-multipart
