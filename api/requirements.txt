@@ -1,0 +1,7 @@
+anthropic
+pdfplumber
+qdrant-client
+requests
+fastapi
+uvicorn[standard]
+python-multipart
