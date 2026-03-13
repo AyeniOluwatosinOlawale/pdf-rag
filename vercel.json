@@ -1,12 +1,7 @@
 {
-  "builds": [
-    { "src": "server.py", "use": "@vercel/python" }
-  ],
-  "routes": [
-    { "src": "/(.*)", "dest": "server.py" }
-  ],
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }],
   "functions": {
-    "server.py": {
+    "api/index.py": {
       "maxDuration": 60
     }
   }
