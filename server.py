@@ -34,8 +34,8 @@ async def index():
 
 @api.post("/ingest-file")
 async def ingest_file(file: UploadFile = File(...)):
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+    if not file.filename.lower().endswith((".pdf", ".docx")):
+        raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported.")
 
     tmp_dir = Path(tempfile.mkdtemp(dir="/tmp"))
     named = tmp_dir / file.filename

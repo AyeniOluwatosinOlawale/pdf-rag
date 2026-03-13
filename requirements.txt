@@ -2,6 +2,7 @@ anthropic
 pdfplumber
 qdrant-client==1.14.3
 requests
+python-docx
 fastapi
 uvicorn[standard]
 python-multipart

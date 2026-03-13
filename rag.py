@@ -6,6 +6,7 @@ from pathlib import Path
 
 import requests
 import pdfplumber
+from docx import Document
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 import anthropic
@@ -45,9 +46,14 @@ def embed(texts: list[str], input_type: str = "search_document", batch_size: int
     return all_embeddings
 
 
-def extract_text(pdf_path: str) -> str:
+def extract_text(path: str) -> str:
+    p = Path(path)
+    if p.suffix.lower() == ".docx":
+        doc = Document(path)
+        return "\n\n".join(para.text for para in doc.paragraphs if para.text.strip())
+    # default: PDF
     text_parts = []
-    with pdfplumber.open(pdf_path) as pdf:
+    with pdfplumber.open(path) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             if text:
