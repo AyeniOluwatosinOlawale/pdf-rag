@@ -16,37 +16,32 @@ CHUNK_OVERLAP = 150
 TOP_K = 5
 MODEL = "claude-opus-4-6"
 VECTOR_SIZE = 384
-HF_API_URL = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
+COHERE_API_URL = "https://api.cohere.com/v2/embed"
+COHERE_MODEL = "embed-english-light-v3.0"  # 384-dim, matches VECTOR_SIZE
 
 
-def embed(texts: list[str], batch_size: int = 32) -> list[list[float]]:
-    """Embed texts via HuggingFace Inference API in batches."""
-    headers = {"Content-Type": "application/json"}
-    token = os.environ.get("HF_TOKEN")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
+def embed(texts: list[str], input_type: str = "search_document", batch_size: int = 96) -> list[list[float]]:
+    """Embed texts via Cohere API in batches."""
+    headers = {
+        "Authorization": f"Bearer {os.environ['COHERE_API_KEY']}",
+        "Content-Type": "application/json",
+    }
     all_embeddings: list[list[float]] = []
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
         resp = requests.post(
-            HF_API_URL,
+            COHERE_API_URL,
             headers=headers,
-            json={"inputs": batch, "options": {"wait_for_model": True}},
-            timeout=60,
+            json={
+                "model": COHERE_MODEL,
+                "input_type": input_type,
+                "texts": batch,
+                "embedding_types": ["float"],
+            },
+            timeout=30,
         )
-        if resp.status_code == 503:
-            # Model still loading — wait and retry once
-            import time
-            time.sleep(10)
-            resp = requests.post(
-                HF_API_URL,
-                headers=headers,
-                json={"inputs": batch, "options": {"wait_for_model": True}},
-                timeout=60,
-            )
         resp.raise_for_status()
-        all_embeddings.extend(resp.json())
+        all_embeddings.extend(resp.json()["embeddings"]["float"])
     return all_embeddings
 
 
@@ -119,7 +114,7 @@ class PDFRag:
         return len(points)
 
     def query(self, question: str, top_k: int = TOP_K) -> str:
-        query_vector = embed([question])[0]
+        query_vector = embed([question], input_type="search_query")[0]
         results = self.qdrant.search(
             collection_name=self.collection_name,
             query_vector=query_vector,
