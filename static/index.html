@@ -201,14 +201,14 @@
 <body>
 
   <h1>PDF RAG</h1>
-  <p class="subtitle">Ask questions about your PDFs — powered by Claude</p>
+  <p class="subtitle">Ask questions about your documents — powered by Claude</p>
 
   <!-- Upload card -->
   <div class="card">
-    <h2>Upload PDFs</h2>
+    <h2>Upload Documents</h2>
     <div class="drop-zone" id="drop-zone">
-      <input type="file" id="file-input" accept=".pdf" multiple />
-      <p>Drop PDF files here or <span>click to browse</span></p>
+      <input type="file" id="file-input" accept=".pdf,.docx" multiple />
+      <p>Drop PDF or DOCX files here or <span>click to browse</span></p>
     </div>
     <div class="file-list" id="file-list"></div>
     <div class="ingest-footer">
@@ -219,7 +219,7 @@
   <!-- Sources card -->
   <div class="card">
     <h2>Ingested Sources</h2>
-    <div id="source-list"><span class="empty-hint">No PDFs ingested yet.</span></div>
+    <div id="source-list"><span class="empty-hint">No documents ingested yet.</span></div>
   </div>
 
   <!-- Chat card -->
@@ -227,7 +227,7 @@
     <h2>Ask a Question</h2>
     <div class="chat-container" id="chat"></div>
     <div class="input-row">
-      <textarea id="question" rows="1" placeholder="Ask something about your PDFs…"></textarea>
+      <textarea id="question" rows="1" placeholder="Ask something about your documents…"></textarea>
       <button class="btn btn-primary" id="ask-btn">Ask</button>
     </div>
   </div>
@@ -265,7 +265,7 @@
   dropZone.addEventListener("drop", e => {
     e.preventDefault();
     dropZone.classList.remove("dragover");
-    addFiles([...e.dataTransfer.files].filter(f => f.name.endsWith(".pdf")));
+    addFiles([...e.dataTransfer.files].filter(f => f.name.match(/\.(pdf|docx)$/i)));
   });
 
   function addFiles(files) {
@@ -315,7 +315,7 @@
     renderFileList();
     ingestBtn.textContent = "Ingest";
 
-    if (ok) toast(`${ok} PDF${ok > 1 ? "s" : ""} ingested successfully.`, "success");
+    if (ok) toast(`${ok} file${ok > 1 ? "s" : ""} ingested successfully.`, "success");
     await loadSources();
   });
 
@@ -325,7 +325,7 @@
     const { sources } = await res.json();
     sourceList.innerHTML = sources.length
       ? sources.map(s => `<span class="source-tag">${s}</span>`).join("")
-      : `<span class="empty-hint">No PDFs ingested yet.</span>`;
+      : `<span class="empty-hint">No documents ingested yet.</span>`;
   }
 
   /* ── Chat ── */
