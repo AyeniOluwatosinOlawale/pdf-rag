@@ -1,12 +1,13 @@
-"""PDF RAG using ChromaDB + Claude."""
+"""PDF RAG using Qdrant + Claude."""
 
 import os
 import uuid
 from pathlib import Path
 
 import pdfplumber
-import chromadb
-from chromadb.utils import embedding_functions
+from fastembed import TextEmbedding
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
 import anthropic
 
 
@@ -14,6 +15,11 @@ CHUNK_SIZE = 800       # characters per chunk
 CHUNK_OVERLAP = 150    # overlap between chunks
 TOP_K = 5              # number of chunks to retrieve
 MODEL = "claude-opus-4-6"
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+VECTOR_SIZE = 384      # output dimension for all-MiniLM-L6-v2
+
+# Cache fastembed models in /tmp so Vercel's read-only filesystem isn't a problem
+os.environ.setdefault("FASTEMBED_CACHE_PATH", "/tmp/fastembed")
 
 
 def extract_text(pdf_path: str) -> str:
@@ -39,23 +45,33 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
 
 
 class PDFRag:
-    """PDF Retrieval-Augmented Generation using ChromaDB and Claude."""
+    """PDF Retrieval-Augmented Generation using Qdrant and Claude."""
 
-    def __init__(self, collection_name: str = "pdf_rag", persist_dir: str = None):
-        if persist_dir is None:
-            persist_dir = os.environ.get("CHROMA_DIR", "./chroma_db")
+    def __init__(self, collection_name: str = "pdf_rag"):
         self.client = anthropic.Anthropic()
-        self.chroma = chromadb.PersistentClient(path=persist_dir)
-        self.embed_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
-        )
-        self.collection = self.chroma.get_or_create_collection(
-            name=collection_name,
-            embedding_function=self.embed_fn,
-        )
+        self.embed_model = TextEmbedding(EMBEDDING_MODEL)
+        self.collection_name = collection_name
+
+        # Qdrant Cloud when QDRANT_URL is set, local file storage otherwise
+        qdrant_url = os.environ.get("QDRANT_URL")
+        if qdrant_url:
+            self.qdrant = QdrantClient(
+                url=qdrant_url,
+                api_key=os.environ.get("QDRANT_API_KEY"),
+            )
+        else:
+            persist_dir = os.environ.get("QDRANT_DIR", "./qdrant_db")
+            self.qdrant = QdrantClient(path=persist_dir)
+
+        existing = {c.name for c in self.qdrant.get_collections().collections}
+        if collection_name not in existing:
+            self.qdrant.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+            )
 
     def ingest(self, pdf_path: str) -> int:
-        """Parse a PDF and store its chunks in ChromaDB. Returns number of chunks added."""
+        """Parse a PDF and store its chunks in Qdrant. Returns number of chunks added."""
         path = Path(pdf_path)
         if not path.exists():
             raise FileNotFoundError(f"PDF not found: {pdf_path}")
@@ -64,19 +80,35 @@ class PDFRag:
         text = extract_text(pdf_path)
         chunks = chunk_text(text)
 
-        ids = [str(uuid.uuid4()) for _ in chunks]
-        metadatas = [{"source": path.name, "chunk_index": i} for i in range(len(chunks))]
+        print(f"Embedding {len(chunks)} chunks...")
+        vectors = [v.tolist() for v in self.embed_model.embed(chunks)]
 
-        print(f"Storing {len(chunks)} chunks in ChromaDB...")
-        self.collection.add(documents=chunks, ids=ids, metadatas=metadatas)
+        points = [
+            PointStruct(
+                id=str(uuid.uuid4()),
+                vector=vector,
+                payload={"source": path.name, "chunk_index": i, "text": chunk},
+            )
+            for i, (chunk, vector) in enumerate(zip(chunks, vectors))
+        ]
+
+        print(f"Storing {len(chunks)} chunks in Qdrant...")
+        self.qdrant.upsert(collection_name=self.collection_name, points=points)
         print(f"Done. Ingested {len(chunks)} chunks from '{path.name}'.")
         return len(chunks)
 
     def query(self, question: str, top_k: int = TOP_K) -> str:
         """Retrieve relevant chunks and ask Claude to answer the question."""
-        results = self.collection.query(query_texts=[question], n_results=top_k)
-        chunks = results["documents"][0]
-        sources = [m["source"] for m in results["metadatas"][0]]
+        query_vector = next(self.embed_model.embed([question])).tolist()
+        results = self.qdrant.search(
+            collection_name=self.collection_name,
+            query_vector=query_vector,
+            limit=top_k,
+            with_payload=True,
+        )
+
+        chunks = [r.payload["text"] for r in results]
+        sources = [r.payload["source"] for r in results]
 
         context = "\n\n---\n\n".join(
             f"[Source: {src}]\n{chunk}" for src, chunk in zip(sources, chunks)
@@ -112,6 +144,10 @@ class PDFRag:
 
     def list_sources(self) -> list[str]:
         """Return the unique PDF sources currently ingested."""
-        results = self.collection.get(include=["metadatas"])
-        sources = {m["source"] for m in results["metadatas"]}
+        points, _ = self.qdrant.scroll(
+            collection_name=self.collection_name,
+            with_payload=True,
+            limit=10000,
+        )
+        sources = {point.payload["source"] for point in points}
         return sorted(sources)

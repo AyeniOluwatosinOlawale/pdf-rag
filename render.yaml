@@ -7,9 +7,9 @@ services:
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false          # you'll paste this in the Render dashboard
-      - key: CHROMA_DIR
-        value: /data/chroma_db
+      - key: QDRANT_DIR
+        value: /data/qdrant_db
     disk:
-      name: chroma-data
+      name: qdrant-data
       mountPath: /data
       sizeGB: 1

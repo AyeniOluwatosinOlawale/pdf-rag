@@ -1,7 +1,7 @@
 anthropic
 pdfplumber
-chromadb
-sentence-transformers
+qdrant-client
+fastembed
 fastapi
 uvicorn[standard]
 python-multipart
