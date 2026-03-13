@@ -19,7 +19,16 @@ EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 VECTOR_SIZE = 384      # output dimension for all-MiniLM-L6-v2
 
 # Cache fastembed models in /tmp so Vercel's read-only filesystem isn't a problem
-os.environ.setdefault("FASTEMBED_CACHE_PATH", "/tmp/fastembed")
+os.environ["FASTEMBED_CACHE_PATH"] = "/tmp/fastembed"
+
+# Module-level singleton — model is downloaded once per container lifetime
+_embed_model: "TextEmbedding | None" = None
+
+def get_embed_model() -> "TextEmbedding":
+    global _embed_model
+    if _embed_model is None:
+        _embed_model = TextEmbedding(EMBEDDING_MODEL)
+    return _embed_model
 
 
 def extract_text(pdf_path: str) -> str:
@@ -49,7 +58,6 @@ class PDFRag:
 
     def __init__(self, collection_name: str = "pdf_rag"):
         self.client = anthropic.Anthropic()
-        self.embed_model = TextEmbedding(EMBEDDING_MODEL)
         self.collection_name = collection_name
 
         # Qdrant Cloud when QDRANT_URL is set, local file storage otherwise
@@ -81,7 +89,7 @@ class PDFRag:
         chunks = chunk_text(text)
 
         print(f"Embedding {len(chunks)} chunks...")
-        vectors = [v.tolist() for v in self.embed_model.embed(chunks)]
+        vectors = [v.tolist() for v in get_embed_model().embed(chunks)]
 
         points = [
             PointStruct(
@@ -99,7 +107,7 @@ class PDFRag:
 
     def query(self, question: str, top_k: int = TOP_K) -> str:
         """Retrieve relevant chunks and ask Claude to answer the question."""
-        query_vector = next(self.embed_model.embed([question])).tolist()
+        query_vector = next(get_embed_model().embed([question])).tolist()
         results = self.qdrant.search(
             collection_name=self.collection_name,
             query_vector=query_vector,
