@@ -12,8 +12,15 @@ from pydantic import BaseModel
 from rag import PDFRag
 
 app = FastAPI(title="PDF RAG")
-rag = PDFRag()
 api = APIRouter(prefix="/api")
+
+_rag = None
+
+def get_rag() -> PDFRag:
+    global _rag
+    if _rag is None:
+        _rag = PDFRag()
+    return _rag
 
 
 class QueryRequest(BaseModel):
@@ -35,7 +42,7 @@ async def ingest_file(file: UploadFile = File(...)):
     named.write_bytes(await file.read())
 
     try:
-        count = rag.ingest(str(named))
+        count = get_rag().ingest(str(named))
         return {"message": f"Ingested '{file.filename}' — {count} chunks added."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -52,7 +59,7 @@ async def query(req: QueryRequest):
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
     try:
-        answer = rag.query(req.question)
+        answer = get_rag().query(req.question)
         return {"answer": answer}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -60,7 +67,7 @@ async def query(req: QueryRequest):
 
 @api.get("/sources")
 async def sources():
-    return {"sources": rag.list_sources()}
+    return {"sources": get_rag().list_sources()}
 
 
 app.include_router(api)
